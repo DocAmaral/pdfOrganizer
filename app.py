@@ -6,7 +6,7 @@ from PIL import Image
 import io
 
 st.set_page_config(layout="wide")
-st.title("📄 Visual PDF Page Organizer")
+st.title("📄 Visual PDF Page Organizer V2")
 
 uploaded_files = st.file_uploader(
     "Upload PDF files",
