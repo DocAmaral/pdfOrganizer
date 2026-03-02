@@ -1,12 +1,11 @@
 import streamlit as st
 from pypdf import PdfReader, PdfWriter
-from pdf2image import convert_from_bytes
+import fitz  # PyMuPDF
 from streamlit_sortables import sort_items
-from PIL import Image
 import io
 
 st.set_page_config(layout="wide")
-st.title("📄 Visual PDF Page Organizer V2")
+st.title("📄 Visual PDF Page Organizer V3 (PyMuPDF)")
 
 uploaded_files = st.file_uploader(
     "Upload PDF files",
@@ -16,26 +15,38 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
 
+    # Store raw file bytes once (important for stability)
+    if "file_bytes" not in st.session_state:
+        st.session_state.file_bytes = [
+            file.read() for file in uploaded_files
+        ]
+
     if "page_pool" not in st.session_state:
         st.session_state.page_pool = []
         st.session_state.page_map = {}
 
-        for file_index, file in enumerate(uploaded_files):
-            reader = PdfReader(file)
-            pages = convert_from_bytes(file.read(), dpi=60)
+        for file_index, file_bytes in enumerate(st.session_state.file_bytes):
 
-            for page_index, img in enumerate(pages):
+            # Open PDF with PyMuPDF
+            doc = fitz.open(stream=file_bytes, filetype="pdf")
+
+            for page_index in range(len(doc)):
+
+                page = doc[page_index]
+
+                # Scale down for thumbnail (0.3 = 30%)
+                mat = fitz.Matrix(0.3, 0.3)
+                pix = page.get_pixmap(matrix=mat)
+
+                img_bytes = pix.tobytes("png")
+
                 label = f"F{file_index+1}-P{page_index+1}"
-                thumb = img.resize((150, 200))
-
-                buffer = io.BytesIO()
-                thumb.save(buffer, format="PNG")
 
                 st.session_state.page_pool.append(label)
                 st.session_state.page_map[label] = {
                     "file_index": file_index,
                     "page_index": page_index,
-                    "image": buffer.getvalue()
+                    "image": img_bytes
                 }
 
     st.subheader("🗂 Drag Pages to Reorder (Pool)")
@@ -68,6 +79,7 @@ if uploaded_files:
 
     for i in range(int(num_outputs)):
         st.markdown(f"### Output File {i+1}")
+
         name = st.text_input(
             f"Filename for Output {i+1}",
             value=f"output_{i+1}.pdf",
@@ -90,7 +102,13 @@ if uploaded_files:
 
             for label in selected_pages:
                 data = st.session_state.page_map[label]
-                reader = PdfReader(uploaded_files[data["file_index"]])
+
+                reader = PdfReader(
+                    io.BytesIO(
+                        st.session_state.file_bytes[data["file_index"]]
+                    )
+                )
+
                 writer.add_page(reader.pages[data["page_index"]])
 
             buffer = io.BytesIO()

@@ -21,6 +21,7 @@ pillow==12.1.1
 protobuf==6.33.5
 pyarrow==23.0.1
 pydeck==0.9.1
+PyMuPDF==1.27.1
 pypdf==6.7.5
 python-dateutil==2.9.0.post0
 pytz==2025.2
