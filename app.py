@@ -1,13 +1,13 @@
 import streamlit as st
 from pypdf import PdfReader, PdfWriter
+from pdf2image import convert_from_bytes
+from streamlit_sortables import sort_items
+from PIL import Image
 import io
 
-st.set_page_config(page_title="PDF Page Organizer", layout="wide")
+st.set_page_config(layout="wide")
+st.title("📄 Visual PDF Page Organizer")
 
-st.title("📄 PDF Page Organizer")
-st.write("Upload one or more PDFs and create custom ordered output files.")
-
-# Upload PDFs
 uploaded_files = st.file_uploader(
     "Upload PDF files",
     type="pdf",
@@ -16,89 +16,90 @@ uploaded_files = st.file_uploader(
 
 if uploaded_files:
 
-    readers = []
-    file_info = []
+    if "page_pool" not in st.session_state:
+        st.session_state.page_pool = []
+        st.session_state.page_map = {}
 
-    # Read PDFs
-    for i, file in enumerate(uploaded_files):
-        reader = PdfReader(file)
-        readers.append(reader)
-        file_info.append({
-            "name": file.name,
-            "pages": len(reader.pages)
-        })
+        for file_index, file in enumerate(uploaded_files):
+            reader = PdfReader(file)
+            pages = convert_from_bytes(file.read(), dpi=60)
 
-    st.subheader("📚 Uploaded Files")
+            for page_index, img in enumerate(pages):
+                label = f"F{file_index+1}-P{page_index+1}"
+                thumb = img.resize((150, 200))
 
-    for idx, info in enumerate(file_info):
-        st.write(f"**File {idx+1}: {info['name']}** — {info['pages']} pages")
+                buffer = io.BytesIO()
+                thumb.save(buffer, format="PNG")
+
+                st.session_state.page_pool.append(label)
+                st.session_state.page_map[label] = {
+                    "file_index": file_index,
+                    "page_index": page_index,
+                    "image": buffer.getvalue()
+                }
+
+    st.subheader("🗂 Drag Pages to Reorder (Pool)")
+    st.write("Drag to reorder. You will assign pages to outputs below.")
+
+    st.session_state.page_pool = sort_items(
+        st.session_state.page_pool,
+        direction="horizontal"
+    )
+
+    # Display thumbnails
+    cols = st.columns(6)
+    for i, label in enumerate(st.session_state.page_pool):
+        with cols[i % 6]:
+            st.image(st.session_state.page_map[label]["image"])
+            st.caption(label)
 
     st.divider()
 
-    st.subheader("🛠 Create Output PDFs")
+    st.subheader("📦 Create Output Files")
 
     num_outputs = st.number_input(
-        "How many output PDFs do you want?",
+        "Number of output PDFs",
         min_value=1,
         value=1,
         step=1
     )
 
-    outputs = []
+    output_structures = []
 
     for i in range(int(num_outputs)):
         st.markdown(f"### Output File {i+1}")
-
         name = st.text_input(
-            f"Output file {i+1} name",
+            f"Filename for Output {i+1}",
             value=f"output_{i+1}.pdf",
             key=f"name_{i}"
         )
 
-        page_input = st.text_area(
-            f"Pages for output {i+1}",
-            placeholder="Example: 1:1, 1:3, 2:5",
-            key=f"pages_{i}"
+        selected_pages = st.multiselect(
+            "Select pages in desired order",
+            options=st.session_state.page_pool,
+            key=f"select_{i}"
         )
 
-        outputs.append((name, page_input))
+        output_structures.append((name, selected_pages))
 
     if st.button("Generate PDFs"):
 
-        for name, page_input in outputs:
+        for name, selected_pages in output_structures:
 
             writer = PdfWriter()
 
-            if not page_input.strip():
-                st.warning(f"No pages specified for {name}")
-                continue
+            for label in selected_pages:
+                data = st.session_state.page_map[label]
+                reader = PdfReader(uploaded_files[data["file_index"]])
+                writer.add_page(reader.pages[data["page_index"]])
 
-            entries = [x.strip() for x in page_input.split(",")]
+            buffer = io.BytesIO()
+            writer.write(buffer)
+            buffer.seek(0)
 
-            try:
-                for entry in entries:
-                    file_idx, page_num = entry.split(":")
-                    file_idx = int(file_idx) - 1
-                    page_num = int(page_num) - 1
-
-                    reader = readers[file_idx]
-
-                    if page_num < 0 or page_num >= len(reader.pages):
-                        st.error(f"Invalid page number in {entry}")
-                        continue
-
-                    writer.add_page(reader.pages[page_num])
-
-                buffer = io.BytesIO()
-                writer.write(buffer)
-                buffer.seek(0)
-
-                st.download_button(
-                    label=f"Download {name}",
-                    data=buffer,
-                    file_name=name,
-                    mime="application/pdf"
-                )
-
-            except Exception as e:
-                st.error(f"Error processing {name}: {e}")
+            st.download_button(
+                label=f"Download {name}",
+                data=buffer,
+                file_name=name,
+                mime="application/pdf"
+            )
